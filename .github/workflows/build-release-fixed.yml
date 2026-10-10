@@ -1,0 +1,109 @@
+name: Build SudarshanCloud APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Locate Android project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Preferred layout: the Android project is already the repository root.
+          if [[ -f "gradlew" && -f "settings.gradle.kts" && -d "app" ]]; then
+            project_dir="$PWD"
+            echo "Using Android project at repository root: $project_dir"
+          else
+            # Also support a repository that stores the project inside a ZIP.
+            zip_file=""
+            while IFS= read -r candidate; do
+              [[ -z "$candidate" ]] && continue
+              zip_file="$candidate"
+              break
+            done < <(find . -maxdepth 3 -type f -name '*.zip' -print | sort)
+
+            if [[ -z "$zip_file" ]]; then
+              echo "No Android project found: gradlew/settings.gradle.kts/app are not at repository root and no ZIP was found."
+              exit 1
+            fi
+
+            echo "Using project archive: $zip_file"
+            rm -rf .github/project-extracted
+            mkdir -p .github/project-extracted
+            unzip -q "$zip_file" -d .github/project-extracted
+
+            project_gradlew="$(find .github/project-extracted -type f -name gradlew -print -quit)"
+            if [[ -z "$project_gradlew" ]]; then
+              echo "The archive does not contain gradlew."
+              echo "Archive contents:"
+              find .github/project-extracted -maxdepth 4 -type f -print | sort | head -200
+              exit 1
+            fi
+
+            project_dir="$(dirname "$project_gradlew")"
+            if [[ ! -f "$project_dir/settings.gradle.kts" || ! -d "$project_dir/app" ]]; then
+              echo "Found gradlew at $project_dir, but this is not a complete Android project."
+              exit 1
+            fi
+
+            echo "Using extracted Android project: $project_dir"
+          fi
+
+          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "project_dir=$project_dir"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install required Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build and test debug APK
+        working-directory: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_dir="${{ steps.project.outputs.project_dir }}"
+          apk="$project_dir/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          echo "APK successfully created:"
+          ls -lh "$apk"
+          echo "APK path: $apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SudarshanCloud-debug-APK
+          path: ${{ steps.project.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
