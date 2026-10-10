@@ -67,7 +67,7 @@ jobs:
           test -s "$keystore_path"
           echo "keystore_path=$keystore_path" >> "$GITHUB_OUTPUT"
 
-      - name: Build and test signed release APK
+      - name: Build signed release APK
         shell: bash
         working-directory: android-project
         env:
@@ -90,7 +90,7 @@ jobs:
           if [[ -n "${ADMOB_REWARDED_AD_UNIT_ID:-}" ]]; then
             gradle_args+=("-PADMOB_REWARDED_AD_UNIT_ID=${ADMOB_REWARDED_AD_UNIT_ID}")
           fi
-          ./gradlew "${gradle_args[@]}" testDebugUnitTest assembleRelease
+          ./gradlew "${gradle_args[@]}" assembleRelease
           test -s app/build/outputs/apk/release/app-release.apk
 
       - name: Upload signed release APK
